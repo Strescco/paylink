@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PayLink — Stablecoin Invoices on Aevum</title>
+<meta name="description" content="Create an invoice, share a link, get paid in tUSD8 on Aevum testnet. No fee, no owner, no backend — all state on-chain.">
+<link rel="stylesheet" href="styles.css">
+<script src="https://cdn.jsdelivr.net/npm/ethers@6.13.2/dist/ethers.umd.min.js"></script>
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">
+    <span class="logo">🔗</span>
+    <div>
+      <h1>PayLink</h1>
+      <p class="tagline">Create an invoice, share a link, get paid in tUSD8.</p>
+    </div>
+  </div>
+  <div class="wallet-box">
+    <span id="networkBadge" class="badge badge-muted">Not connected</span>
+    <button id="connectBtn" class="btn btn-primary">Connect Wallet</button>
+    <button id="addNetworkBtn" class="btn btn-ghost" title="Add Aevum testnet (chain 44005) to your wallet">+ Aevum Network</button>
+  </div>
+</header>
+
+<main class="container">
+
+  <!-- Not-deployed banner (shown while PAYLINK_ADDRESS is empty) -->
+  <section id="notDeployedBanner" class="banner banner-warn" hidden>
+    <strong>⚠️ PayLink contract not deployed yet.</strong>
+    <span>This interface is ready — the contract address will appear here after deploy.
+    You can still connect your wallet and get test tokens from the faucet below.</span>
+  </section>
+
+  <!-- Wrong-network banner -->
+  <section id="wrongNetworkBanner" class="banner banner-warn" hidden>
+    <strong>⚠️ Wrong network.</strong>
+    <span>You are not on Aevum testnet (chain 44005).</span>
+    <button id="switchNetworkBtn" class="btn btn-small">Switch to Aevum</button>
+  </section>
+
+  <section id="statusLine" class="status-line" aria-live="polite"></section>
+
+  <!-- Wallet + token info -->
+  <section class="card">
+    <h2>Your wallet</h2>
+    <dl class="kv">
+      <div><dt>Address</dt><dd id="walletAddress">—</dd></div>
+      <div><dt>tQDAY balance (gas)</dt><dd id="gasBalance">—</dd></div>
+      <div><dt>tUSD8 balance</dt><dd id="tokenBalance">—</dd></div>
+      <div><dt>PayLink contract</dt><dd id="contractAddress">—</dd></div>
+    </dl>
+    <p class="hint">Need test tokens? <a href="https://faucet.qday.info" target="_blank" rel="noopener">tQDAY gas faucet ↗</a>
+    · tUSD8 comes from the <a href="https://faucet.qday.info" target="_blank" rel="noopener">same faucet page ↗</a>
+    (1 tUSD8 per claim). No real money — testnet only.</p>
+  </section>
+
+  <!-- Create invoice -->
+  <section class="card">
+    <h2>Create invoice</h2>
+    <p class="hint">You are the merchant. The payer can be a specific address, or anyone (leave blank).</p>
+    <form id="createForm">
+      <label>Amount (tUSD8)
+        <input id="createAmount" type="number" min="0.000001" step="any" placeholder="10" required>
+      </label>
+      <label>Payer address (optional — blank = anyone can pay)
+        <input id="createPayer" type="text" inputmode="text" placeholder="0x… (optional)">
+      </label>
+      <label>Valid for
+        <select id="createDuration">
+          <option value="3600">1 hour</option>
+          <option value="86400" selected>24 hours</option>
+          <option value="604800">7 days</option>
+          <option value="2592000">30 days</option>
+        </select>
+      </label>
+      <label>Memo (max 200 characters)
+        <input id="createMemo" type="text" maxlength="200" placeholder="e.g. Design logo — standard package">
+      </label>
+      <button type="submit" class="btn btn-primary" id="createBtn">Create invoice</button>
+    </form>
+    <div id="createResult" class="result" aria-live="polite"></div>
+  </section>
+
+  <!-- Find / view one invoice -->
+  <section class="card">
+    <h2>Find an invoice</h2>
+    <form id="lookupForm" class="inline-form">
+      <label>Invoice #
+        <input id="lookupId" type="number" min="1" step="1" placeholder="1" required>
+      </label>
+      <button type="submit" class="btn btn-primary">Look up</button>
+      <button type="button" class="btn btn-ghost" id="copyLinkBtn">Copy share link</button>
+    </form>
+    <div id="invoiceDetail"></div>
+  </section>
+
+  <!-- All invoices -->
+  <section class="card">
+    <h2>All invoices <span id="invoiceCount" class="muted"></span></h2>
+    <p class="hint">Read straight from the contract — newest first. Click an invoice to open it.</p>
+    <div class="table-wrap">
+      <table id="invoiceTable">
+        <thead>
+          <tr><th>#</th><th>Amount</th><th>Merchant</th><th>Payer</th><th>Status</th><th>Expires</th><th></th></tr>
+        </thead>
+        <tbody id="invoiceRows">
+          <tr><td colspan="7" class="muted">Connect a wallet to load invoices.</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <button class="btn btn-ghost" id="refreshBtn">Refresh</button>
+  </section>
+
+  <section class="card">
+    <h2>How it works</h2>
+    <ol class="steps">
+      <li><strong>Merchant</strong> creates an invoice (amount, payer, memo, expiry) and shares the link.</li>
+      <li><strong>Payer</strong> approves exactly the invoice amount in tUSD8, then pays — funds go into escrow in the contract.</li>
+      <li><strong>Merchant</strong> clicks <em>Settle</em> to withdraw the tUSD8 to their wallet.</li>
+      <li>If the invoice expires unpaid, it can no longer be paid. If it is paid but the merchant never settles within 7 days, the payer can <em>Refund</em> in full.</li>
+      <li>No protocol fee, no owner, no admin, no backend. Every state change is on-chain and verifiable in the explorer.</li>
+    </ol>
+    <p class="hint">Contract: <span id="contractLink">not deployed yet</span> · Token: <a href="https://explorer-test.qday.info/address/0x456569838f1d43009A91ebA4263147Afd7233483" target="_blank" rel="noopener">tUSD8 ↗</a> · Chain: Aevum testnet (44005)</p>
+  </section>
+
+</main>
+
+<footer class="footer">
+  PayLink — Aevum Builder Challenge #1 · Built on Aevum testnet (chain 44005) · Test tokens only, no real value.
+</footer>
+
+<script src="config.js"></script>
+<script src="abi.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
