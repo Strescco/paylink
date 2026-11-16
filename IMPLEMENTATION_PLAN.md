@@ -132,11 +132,15 @@
 
 ### D1. Interface web (±6–8 jam)
 
-- [ ] Bangun `app/index.html` + `app/app.js` + `app/styles.css` + `app/config.js` sesuai `ARCHITECTURE.md` §4.5.
-- [ ] Fitur: konek wallet (MetaMask, network 44005) → buat invoice → lihat detail invoice (status, sisa waktu) → approve + bayar → tarik dana (merchant) → refund (bila memenuhi syarat).
-- [ ] Semua jumlah diformat memakai `decimals()` yang dibaca dari kontrak token — jangan hardcode.
-- [ ] Setiap transaksi menampilkan hash + tautan explorer; setiap error ditampilkan dengan bahasa yang dimengerti (bukan pesan revert mentah).
+- [x] Bangun `app/index.html` + `app/app.js` + `app/styles.css` + `app/config.js` sesuai `ARCHITECTURE.md` §4.5.
+  (Selesai 16 Nov 2026 ~13:30 WIB, Fase D dimajukan — plus `app/abi.js` dari artefak build Foundry.)
+- [x] Fitur: konek wallet (MetaMask, network 44005) → buat invoice → lihat detail invoice (status, sisa waktu) → approve + bayar → tarik dana (merchant) → refund (bila memenuhi syarat).
+  (Plus: daftar semua invoice dari chain, deep link `?invoice=N`, copy share link, add/switch network.)
+- [x] Semua jumlah diformat memakai `decimals()` yang dibaca dari kontrak token — jangan hardcode.
+  (Fallback 6 desimal hanya sebelum token terbaca; tUSD8 terverifikasi 6 desimal on-chain.)
+- [x] Setiap transaksi menampilkan hash + tautan explorer; setiap error ditampilkan dengan bahasa yang dimengerti (bukan pesan revert mentah).
 - [ ] Uji di desktop dan mobile (responsif); uji dengan wallet yang berbeda untuk peran merchant vs payer.
+  (Tertunda: butuh kontrak ter-deploy + tQDAY. Uji lokal lolos: 12/12 smoke check jalur belum-deploy + 9/9 jalur ter-deploy via jsdom; uji live setelah deploy.)
 
 ### D2. Skrip demo CLI (opsional, ±1 jam)
 
