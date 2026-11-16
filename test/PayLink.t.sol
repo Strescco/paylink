@@ -15,14 +15,18 @@ contract PayLinkTest is Test {
     address internal merchant = makeAddr("merchant");
     address internal payer = makeAddr("payer");
     address internal other = makeAddr("other");
+    address internal feeCollector = makeAddr("feeCollector");
 
     uint256 internal constant TEN = 10_000_000; // 10 tUSD8
     uint256 internal constant FIVE = 5_000_000; // 5 tUSD8
     uint256 internal constant DAY = 1 days;
+    // 0.5% protocol fee on settle (v2): 10 tUSD8 -> 0.05 tUSD8 fee.
+    uint256 internal constant TEN_FEE = 50_000;
 
     function setUp() public {
         token = new MockTUSD8();
-        payLink = new PayLink(address(token));
+        // v2 constructor: (token, registry, feeRecipient). Registry = none here.
+        payLink = new PayLink(address(token), address(0), feeCollector);
         token.mint(payer, 1_000_000_000_000); // 1,000,000 tUSD8
         token.mint(other, 1_000_000_000_000);
         token.mint(merchant, 1_000_000_000_000);
@@ -244,7 +248,9 @@ contract PayLinkTest is Test {
         payLink.settleInvoice(id);
 
         assertEq(uint256(payLink.getInvoice(id).status), uint256(PayLink.Status.Settled));
-        assertEq(token.balanceOf(merchant), before + TEN);
+        // v2: 0.5% protocol fee on settle — merchant gets amount - fee.
+        assertEq(token.balanceOf(merchant), before + TEN - TEN_FEE);
+        assertEq(token.balanceOf(feeCollector), TEN_FEE);
         assertEq(token.balanceOf(address(payLink)), 0);
     }
 
@@ -421,9 +427,13 @@ contract PayLinkTest is Test {
         uint256 id = _create(payer, amount, DAY, "fuzz");
         _pay(id, payer);
         uint256 merchantBefore = token.balanceOf(merchant);
+        uint256 feeBefore = token.balanceOf(feeCollector);
         vm.prank(merchant);
         payLink.settleInvoice(id);
-        assertEq(token.balanceOf(merchant), merchantBefore + amount);
+        // v2: merchant gets amount - fee, feeRecipient gets the 0.5% fee.
+        uint256 fee = (amount * 50) / 10_000;
+        assertEq(token.balanceOf(merchant), merchantBefore + amount - fee);
+        assertEq(token.balanceOf(feeCollector), feeBefore + fee);
         assertEq(token.balanceOf(address(payLink)), 0);
     }
 
@@ -437,7 +447,7 @@ contract PayLinkTest is Test {
     function test_38_Reentrancy_SettleResistsAttack() public {
         Attacker attacker = new Attacker();
         EvilToken evil = new EvilToken();
-        PayLink evilLink = new PayLink(address(evil));
+        PayLink evilLink = new PayLink(address(evil), address(0), feeCollector);
 
         // Attacker (as merchant) creates an invoice; payer pays with the evil token.
         evil.mint(payer, TEN);
@@ -452,8 +462,10 @@ contract PayLinkTest is Test {
 
         // Attacker settles; the token transfer tries to reenter settleInvoice.
         // ReentrancyGuard blocks the inner call; the outer call pays exactly once.
+        // v2: attacker (merchant) gets TEN - fee; feeCollector gets the fee.
         attacker.settle(address(evilLink), id);
-        assertEq(evil.balanceOf(address(attacker)), TEN);
+        assertEq(evil.balanceOf(address(attacker)), TEN - TEN_FEE);
+        assertEq(evil.balanceOf(feeCollector), TEN_FEE);
         assertEq(evil.balanceOf(address(evilLink)), 0);
         assertEq(uint256(evilLink.getInvoice(id).status), uint256(PayLink.Status.Settled));
     }
