@@ -2,9 +2,12 @@
 // All values verified against QDay docs / explorer (see docs/TESTNET_ADDRESSES.md).
 const CONFIG = {
   // >>> FILL THIS IN AFTER DEPLOY <<<
-  // PayLink contract address on Aevum testnet. Empty = not deployed yet:
+  // PayLink v2 contract address on Aevum testnet. Empty = not deployed yet:
   // the UI shows a "contract not deployed yet" state instead of breaking.
-  PAYLINK_ADDRESS: "0x5da6Fa808f3F5C489d3eD49d7dB8bcf85B5Da5A3",
+  PAYLINK_ADDRESS: "0x49841BDaA70a41D6a49dE1e87a6EF61215719167",
+
+  // AgentRegistry (v2) — on-chain agent identity + reputation.
+  REGISTRY_ADDRESS: "0x432de42876b6e4416979924FEC83D8B678f50fb3",
 
   // Aevum testnet (QDay) — chain 44005 (0xABE5)
   CHAIN_ID: 44005,
@@ -29,4 +32,7 @@ const CONFIG = {
   MIN_DURATION_HOURS: 1,
   MAX_DURATION_DAYS: 30,
   MAX_MEMO_BYTES: 200,
+  // v2: 0.5% protocol fee on settle (50 bps), fee-free refunds.
+  FEE_BPS: 50,
+  FEE_PERCENT: 0.5,
 };

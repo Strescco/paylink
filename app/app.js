@@ -25,6 +25,8 @@ const state = {
   chainId: null,
   paylink: null,       // signer-connected contract (null until deployed+connected)
   paylinkRead: null,   // read-only contract
+  registry: null,      // signer-connected AgentRegistry (v2)
+  registryRead: null,  // read-only AgentRegistry
   token: null,         // signer-connected tUSD8
   tokenRead: null,
   tokenDecimals: CONFIG.TUSD8_DECIMALS_FALLBACK,
@@ -89,6 +91,16 @@ function friendlyError(err) {
     ZeroAmount: "Amount must be greater than 0.",
     MemoTooLong: "Memo is too long (max 200 characters).",
     SafeERC20FailedOperation: "Token transfer failed — check your tUSD8 balance and approval.",
+    AgentNotApproved: "This agent is not approved by the merchant (or was revoked).",
+    AgentApprovalExpired: "This agent's approval has expired — ask the merchant to re-approve.",
+    AgentCapExceeded: "This payment would exceed the agent's approved spending cap.",
+    ZeroAgentAddress: "Agent address must not be empty.",
+    ZeroCap: "Spending cap must be greater than 0.",
+    AlreadyRegistered: "This address is already registered as an agent.",
+    EmptyName: "Agent name must not be empty.",
+    AgentNotRegistered: "This address is not registered as an agent.",
+    NotAuthorizedPayLink: "This PayLink contract is not authorized in the registry.",
+    NotOwner: "Only the registry owner can do that.",
   };
   for (const [key, text] of Object.entries(known)) {
     if (msg.includes(key)) return text;
@@ -114,6 +126,7 @@ function initReadProvider() {
   if (state.deployed && state.readProvider) {
     state.paylinkRead = new ethers.Contract(CONFIG.PAYLINK_ADDRESS, PAYLINK_ABI, state.readProvider);
     state.tokenRead = new ethers.Contract(CONFIG.TUSD8_ADDRESS, ERC20_ABI, state.readProvider);
+    state.registryRead = new ethers.Contract(CONFIG.REGISTRY_ADDRESS, REGISTRY_ABI, state.readProvider);
   }
 }
 
@@ -164,6 +177,7 @@ async function connectWallet() {
     state.chainId = Number(net.chainId);
     if (state.deployed) {
       state.paylink = new ethers.Contract(CONFIG.PAYLINK_ADDRESS, PAYLINK_ABI, state.signer);
+      state.registry = new ethers.Contract(CONFIG.REGISTRY_ADDRESS, REGISTRY_ABI, state.signer);
     }
     state.token = new ethers.Contract(CONFIG.TUSD8_ADDRESS, ERC20_ABI, state.signer);
 
@@ -255,7 +269,10 @@ function actionButtons(inv, effectiveStatus) {
     if (isMerchant) btns.push(`<button class="btn btn-danger" data-act="cancel">Cancel invoice</button>`);
   }
   if (effectiveStatus === 1 && isMerchant) {
-    btns.push(`<button class="btn btn-primary" data-act="settle">Settle — withdraw ${fmtAmount(inv.amount)} ${state.tokenSymbol}</button>`);
+    // v2: settle takes a 0.5% protocol fee — show the net amount the merchant gets.
+    const fee = (BigInt(inv.amount) * 50n) / 10000n;
+    const net = BigInt(inv.amount) - fee;
+    btns.push(`<button class="btn btn-primary" data-act="settle">Settle — withdraw ${fmtAmount(net)} ${state.tokenSymbol} (0.5% fee ${fmtAmount(fee)})</button>`);
   }
   if (effectiveStatus === 1 && isPaidBy) {
     btns.push(`<button class="btn btn-primary" data-act="refund" ${refundOpen ? "" : "disabled"}>Refund${refundOpen ? "" : " (opens after claim deadline)"}</button>`);
@@ -339,6 +356,106 @@ async function refreshInvoiceList() {
     tbody.innerHTML = rows.join("") || '<tr><td colspan="7" class="muted">No invoices found.</td></tr>';
   } catch (err) {
     tbody.innerHTML = '<tr><td colspan="7" class="muted">Could not load invoices: ' + escapeHtml(friendlyError(err)) + "</td></tr>";
+  }
+}
+
+// ---------- agents (v2) ----------
+
+async function doRegisterAgent(e) {
+  e.preventDefault();
+  try {
+    await requireReady();
+    if (!state.registry) throw new Error("AgentRegistry not available.");
+    const name = $("agentName").value.trim();
+    const metadata = $("agentMetadata").value.trim();
+    if (!name) throw new Error("Agent name must not be empty.");
+    setStatus("⏳ Registering agent… confirm in your wallet.");
+    const tx = await state.registry.registerAgent(name, metadata);
+    await waitTx(tx, "Registering agent");
+    $("registerResult").innerHTML = `✅ Registered as agent <strong>${escapeHtml(name)}</strong>. ${txLink(tx.hash)}`;
+    setStatus(`Registered as agent "${name}".`, "ok");
+  } catch (err) {
+    setStatus("❌ " + friendlyError(err), "error");
+  }
+}
+
+async function doApproveAgent(e) {
+  e.preventDefault();
+  try {
+    await requireReady();
+    const agentAddr = $("approveAgentAddr").value.trim();
+    const capStr = $("approveAgentCap").value.trim();
+    const duration = Number($("approveAgentDuration").value);
+    if (!ethers.isAddress(agentAddr)) throw new Error("Agent address is not a valid address.");
+    if (!capStr || Number(capStr) <= 0) throw new Error("Spending cap must be greater than 0.");
+    const cap = ethers.parseUnits(capStr, state.tokenDecimals);
+    setStatus(`⏳ Approving agent ${shortAddr(agentAddr)} with cap ${capStr} ${state.tokenSymbol}… confirm in your wallet.`);
+    const tx = await state.paylink.approveAgent(agentAddr, cap, duration);
+    await waitTx(tx, "Approving agent");
+    $("approveResult").innerHTML =
+      `✅ Agent <strong>${agentAddr}</strong> approved — cap ${capStr} ${state.tokenSymbol}, ` +
+      `valid ${duration >= 86400 ? Math.round(duration / 86400) + " day(s)" : Math.round(duration / 3600) + " hour(s)"}. ${txLink(tx.hash)}`;
+    setStatus("Agent approved.", "ok");
+  } catch (err) {
+    setStatus("❌ " + friendlyError(err), "error");
+  }
+}
+
+async function doRevokeAgent(agentAddr) {
+  try {
+    await requireReady();
+    setStatus(`⏳ Revoking agent ${shortAddr(agentAddr)}… confirm in your wallet.`);
+    const tx = await state.paylink.revokeAgent(agentAddr);
+    await waitTx(tx, "Revoking agent");
+    setStatus(`✅ Agent ${shortAddr(agentAddr)} revoked. ${txLink(tx.hash)}`, "ok");
+    await doAgentLookup(agentAddr);
+  } catch (err) {
+    setStatus("❌ " + friendlyError(err), "error");
+  }
+}
+
+async function doAgentLookup(agentAddr) {
+  const addr = (agentAddr || $("agentLookupAddr").value.trim());
+  const box = $("agentLookupResult");
+  const revokeBox = $("revokeBox");
+  revokeBox.innerHTML = "";
+  try {
+    if (!ethers.isAddress(addr)) throw new Error("Agent address is not a valid address.");
+    const read = state.registryRead || state.registry;
+    const payRead = state.paylinkRead || state.paylink;
+    if (!read || !payRead) throw new Error("Contracts not deployed yet.");
+    const registered = await read.isRegistered(addr);
+    let html = `<div class="detail-grid">
+      <div class="row"><span>Agent</span><span>${addr}</span></div>
+      <div class="row"><span>Registered</span><span>${registered ? "Yes ✓" : "No"}</span></div>`;
+    if (registered) {
+      const a = await read.getAgent(addr);
+      html += `
+      <div class="row"><span>Name</span><span>${escapeHtml(a.name)}</span></div>
+      <div class="row"><span>Metadata</span><span>${a.metadataURI ? escapeHtml(a.metadataURI) : "—"}</span></div>
+      <div class="row"><span>Settled invoices</span><span>${a.settledCount}</span></div>
+      <div class="row"><span>Settled volume</span><span>${fmtAmount(a.settledVolume)} ${state.tokenSymbol}</span></div>`;
+    }
+    if (state.account) {
+      const ap = await payRead.getAgentApproval(state.account, addr);
+      const expired = ap.expiry > 0n && Math.floor(Date.now() / 1000) > Number(ap.expiry);
+      html += `
+      <div class="row"><span>Your approval for this agent</span><span>${ap.cap > 0n ? (ap.active ? (expired ? "Expired" : "Active ✓") : "Revoked") : "None"}</span></div>`;
+      if (ap.cap > 0n) {
+        html += `
+      <div class="row"><span>Cap / spent</span><span>${fmtAmount(ap.cap)} / ${fmtAmount(ap.spent)} ${state.tokenSymbol}</span></div>
+      <div class="row"><span>Approval expiry</span><span>${fmtTime(ap.expiry)}</span></div>`;
+        if (ap.active) {
+          revokeBox.innerHTML = `<button class="btn btn-danger" id="revokeAgentBtn">Revoke this agent</button>`;
+          $("revokeAgentBtn").addEventListener("click", () => doRevokeAgent(addr));
+        }
+      }
+    }
+    html += `</div>`;
+    box.innerHTML = html;
+  } catch (err) {
+    box.innerHTML = "";
+    setStatus("❌ " + friendlyError(err), "error");
   }
 }
 
@@ -428,6 +545,9 @@ function bindEvents() {
   $("addNetworkBtn").addEventListener("click", addNetwork);
   $("switchNetworkBtn").addEventListener("click", switchNetwork);
   $("createForm").addEventListener("submit", doCreate);
+  $("registerAgentForm").addEventListener("submit", doRegisterAgent);
+  $("approveAgentForm").addEventListener("submit", doApproveAgent);
+  $("agentLookupForm").addEventListener("submit", (e) => { e.preventDefault(); doAgentLookup(); });
   $("refreshBtn").addEventListener("click", async () => { await refreshTokenMeta(); await refreshInvoiceList(); });
   $("lookupForm").addEventListener("submit", (e) => { e.preventDefault(); loadInvoice(Number($("lookupId").value)); });
   $("copyLinkBtn").addEventListener("click", async () => {

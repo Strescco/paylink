@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>PayLink — Stablecoin Invoices on Aevum</title>
-<meta name="description" content="Create an invoice, share a link, get paid in tUSD8 on Aevum testnet. No fee, no owner, no backend — all state on-chain.">
+<meta name="description" content="Create an invoice, share a link, get paid in tUSD8 on Aevum testnet. Agent-native payments with spending caps, 0.5% protocol fee on settle, no backend — all state on-chain.">
 <link rel="stylesheet" href="styles.css">
 <script src="https://cdn.jsdelivr.net/npm/ethers@6.13.2/dist/ethers.umd.min.js"></script>
 </head>
@@ -83,6 +83,61 @@
     <div id="createResult" class="result" aria-live="polite"></div>
   </section>
 
+  <!-- Agents (v2): register, approve with spending cap, revoke, reputation -->
+  <section class="card">
+    <h2>Agents <span class="muted">(v2 — agent-native payments)</span></h2>
+    <p class="hint">An AI agent pays invoices from its own wallet — but only inside the
+    spending cap a merchant approved for it, and only until the approval expires.
+    The merchant can revoke anytime. Settled invoices paid by a registered agent
+    grow that agent's on-chain reputation. Caps are enforced in the contract,
+    not by any off-chain service.</p>
+
+    <h3>Register as an agent</h3>
+    <form id="registerAgentForm" class="inline-form">
+      <label>Agent name
+        <input id="agentName" type="text" maxlength="100" placeholder="e.g. InvoiceBot-01" required>
+      </label>
+      <label>Metadata URI (optional)
+        <input id="agentMetadata" type="text" placeholder="ipfs://… or https://…">
+      </label>
+      <button type="submit" class="btn btn-primary">Register agent</button>
+    </form>
+    <div id="registerResult" class="result" aria-live="polite"></div>
+
+    <h3>Approve an agent (merchant)</h3>
+    <p class="hint">You are the merchant. Approve an agent address with a total spending
+    cap (tUSD8) and an expiry. The agent can then pay your invoices up to that
+    cap. Re-approving resets the spent amount to 0.</p>
+    <form id="approveAgentForm">
+      <label>Agent address
+        <input id="approveAgentAddr" type="text" placeholder="0x…" required>
+      </label>
+      <label>Spending cap (tUSD8)
+        <input id="approveAgentCap" type="number" min="0.000001" step="any" placeholder="2" required>
+      </label>
+      <label>Valid for
+        <select id="approveAgentDuration">
+          <option value="3600">1 hour</option>
+          <option value="86400">24 hours</option>
+          <option value="604800" selected>7 days</option>
+          <option value="2592000">30 days</option>
+        </select>
+      </label>
+      <button type="submit" class="btn btn-primary" id="approveAgentBtn">Approve agent</button>
+    </form>
+    <div id="approveResult" class="result" aria-live="polite"></div>
+
+    <h3>Check an approval / reputation</h3>
+    <form id="agentLookupForm" class="inline-form">
+      <label>Agent address
+        <input id="agentLookupAddr" type="text" placeholder="0x…" required>
+      </label>
+      <button type="submit" class="btn btn-primary">Look up</button>
+    </form>
+    <div id="agentLookupResult" class="result" aria-live="polite"></div>
+    <div id="revokeBox"></div>
+  </section>
+
   <!-- Find / view one invoice -->
   <section class="card">
     <h2>Find an invoice</h2>
@@ -118,7 +173,8 @@
     <ol class="steps">
       <li><strong>Merchant</strong> creates an invoice (amount, payer, memo, expiry) and shares the link.</li>
       <li><strong>Payer</strong> approves exactly the invoice amount in tUSD8, then pays — funds go into escrow in the contract.</li>
-      <li><strong>Merchant</strong> clicks <em>Settle</em> to withdraw the tUSD8 to their wallet.</li>
+      <li><strong>Merchant</strong> clicks <em>Settle</em> to withdraw the tUSD8 to their wallet — minus the 0.5% protocol fee, which goes to the protocol fee recipient (visible in the explorer). Refunds are always fee-free and return the full amount.</li>
+      <li><strong>Agents (v2):</strong> a merchant approves an agent with a spending cap and expiry; the agent pays invoices within the cap; the merchant can revoke anytime. Settled invoices paid by a registered agent grow that agent's on-chain reputation in the AgentRegistry.</li>
       <li>If the invoice expires unpaid, it can no longer be paid. If it is paid but the merchant never settles within 7 days, the payer can <em>Refund</em> in full.</li>
       <li>No protocol fee, no owner, no admin, no backend. Every state change is on-chain and verifiable in the explorer.</li>
     </ol>
@@ -133,6 +189,7 @@
 
 <script src="config.js"></script>
 <script src="abi.js"></script>
+<script src="paylink-sdk.js"></script>
 <script src="app.js"></script>
 </body>
 </html>
